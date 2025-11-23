@@ -14,15 +14,15 @@ func _(err error) bool {
 		return false
 	}
 
-	// Don't retry on context errors - these should cancel immediately
+	// Don't retry on context errors, these should cancel immediately
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
 	}
 
-	// Check for recoverable network errors
+	// Check for recoverable network errors, all net.Error types are potentially recoverable
 	var netErr net.Error
 	if errors.As(err, &netErr) {
-		return true // All net.Error types are potentially recoverable
+		return true
 	}
 
 	var syscallErr *os.SyscallError
