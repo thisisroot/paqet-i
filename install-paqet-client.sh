@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# paqet Server Installer Script
-# This script automates the installation and configuration of paqet server
-# Usage: bash install-paqet-server.sh (will use sudo when needed)
+# paqet Client Installer Script
+# This script automates the installation and configuration of paqet client
+# Usage: bash install-paqet-client.sh (will use sudo when needed)
 
 set -e
 
@@ -63,7 +63,7 @@ else
     print_info "Running as root user"
 fi
 
-print_header "paqet Server Installation"
+print_header "paqet Client Installation"
 
 # Step 1: System Update
 print_header "Step 1: Updating System"
@@ -124,19 +124,24 @@ print_header "Step 6: Testing paqet Installation"
 paqet --help
 print_success "paqet is working correctly"
 
-# Step 7: Generate Secret Key
-print_header "Step 7: Generating Secret Key"
-SECRET_KEY=$(paqet secret | tail -n 1)
-print_success "Secret key generated: ${GREEN}${SECRET_KEY}${NC}"
-print_warning "IMPORTANT: Save this key! You'll need it for client configuration."
+# Step 7: Server Configuration Input
+print_header "Step 7: Server Configuration"
+echo ""
+print_warning "You need the following information from your paqet server:"
+print_info "  1. Server IP address and port (e.g., 195.248.240.47:9999)"
+print_info "  2. Secret key (generated on server)"
+echo ""
+read -p "Enter server address (IP:PORT): " SERVER_ADDR
+read -p "Enter secret key from server: " SECRET_KEY
 
-if [ "$IS_ROOT" = true ]; then
-    echo "${SECRET_KEY}" > /root/paqet-secret-key.txt
-    print_info "Secret key also saved to: /root/paqet-secret-key.txt"
-else
-    echo "${SECRET_KEY}" > ~/paqet-secret-key.txt
-    print_info "Secret key also saved to: ~/paqet-secret-key.txt"
+# Validate input
+if [ -z "$SERVER_ADDR" ] || [ -z "$SECRET_KEY" ]; then
+    print_error "Server address and secret key are required!"
+    exit 1
 fi
+
+print_success "Server configuration captured"
+print_info "Server: ${GREEN}${SERVER_ADDR}${NC}"
 
 # Step 8: Network Configuration Discovery
 print_header "Step 8: Discovering Network Configuration"
@@ -158,74 +163,93 @@ sleep 1
 GATEWAY_MAC=$(arp -n ${GATEWAY_IP} | grep ${GATEWAY_IP} | awk '{print $3}')
 print_success "Gateway MAC Address: ${GREEN}${GATEWAY_MAC}${NC}"
 
-# Get Server IP
-SERVER_IP=$(ip -4 addr show ${INTERFACE} | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
-print_success "Server IP Address: ${GREEN}${SERVER_IP}${NC}"
+# Get Client IP
+CLIENT_IP=$(ip -4 addr show ${INTERFACE} | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
+print_success "Client IP Address: ${GREEN}${CLIENT_IP}${NC}"
 
 # Display interface info
 print_info "Network Interface Details:"
 ip link show ${INTERFACE}
 
-# Step 9: Prompt for paqet Port Configuration
-print_header "Step 9: paqet Port Configuration"
-print_warning "IMPORTANT: Do NOT use standard ports like 80 or 443 for paqet server!"
-print_warning "Using standard ports can cause issues with iptables rules affecting outgoing connections."
-print_info "Recommended ports: 9999, 8888, or other high-numbered ports (1024-65535)"
-echo ""
-read -p "Enter the port for paqet server (default: 9999): " PAQET_PORT
-PAQET_PORT=${PAQET_PORT:-9999}
-print_info "Using port: ${PAQET_PORT}"
+# Step 9: SOCKS5 Configuration
+print_header "Step 9: SOCKS5 Proxy Configuration"
+read -p "Enter SOCKS5 listen address (default: 127.0.0.1:1080): " SOCKS5_LISTEN
+SOCKS5_LISTEN=${SOCKS5_LISTEN:-127.0.0.1:1080}
+print_info "SOCKS5 proxy will listen on: ${SOCKS5_LISTEN}"
 
-# Step 10: Configure iptables
-print_header "Step 10: Configuring iptables Rules"
-print_info "Setting up iptables rules for port ${PAQET_PORT}..."
-$SUDO_CMD iptables -t raw -A PREROUTING -p tcp --dport ${PAQET_PORT} -j NOTRACK
-$SUDO_CMD iptables -t raw -A OUTPUT -p tcp --sport ${PAQET_PORT} -j NOTRACK
-$SUDO_CMD iptables -t mangle -A OUTPUT -p tcp --sport ${PAQET_PORT} --tcp-flags RST RST -j DROP
+# Step 10: Client Port for iptables
+print_header "Step 10: Client Port Configuration for iptables"
+print_info "Enter the port to configure iptables rules for (usually matches UFW port)"
+read -p "Enter port for iptables rules (default: 443): " CLIENT_PORT
+CLIENT_PORT=${CLIENT_PORT:-443}
+print_info "Using port: ${CLIENT_PORT}"
+
+# Step 11: Configure iptables
+print_header "Step 11: Configuring iptables Rules"
+print_info "Setting up iptables rules for port ${CLIENT_PORT}..."
+$SUDO_CMD iptables -t raw -A PREROUTING -p tcp --dport ${CLIENT_PORT} -j NOTRACK
+$SUDO_CMD iptables -t raw -A OUTPUT -p tcp --sport ${CLIENT_PORT} -j NOTRACK
+$SUDO_CMD iptables -t mangle -A OUTPUT -p tcp --sport ${CLIENT_PORT} --tcp-flags RST RST -j DROP
 $SUDO_CMD netfilter-persistent save
 print_success "iptables rules configured and saved"
 
-# Step 11: Create Configuration Directory and File
-print_header "Step 11: Creating Configuration"
+# Step 12: Create Configuration Directory and File
+print_header "Step 12: Creating Configuration"
 $SUDO_CMD mkdir -p /etc/paqet
 
 # Check if example file exists in the extracted archive
-if [ -f "example/server.yaml.example" ]; then
-    print_info "Using server.yaml.example from the package..."
-    $SUDO_CMD cp example/server.yaml.example /etc/paqet/server.yaml
+if [ -f "example/client.yaml.example" ]; then
+    print_info "Using client.yaml.example from the package..."
+    $SUDO_CMD cp example/client.yaml.example /etc/paqet/client.yaml
     
     # Update the configuration file with discovered values
-    $SUDO_CMD sed -i "s|interface:.*|interface: \"${INTERFACE}\"|g" /etc/paqet/server.yaml
-    $SUDO_CMD sed -i "s|addr: \":.*\"|addr: \":${PAQET_PORT}\"|g" /etc/paqet/server.yaml
-    $SUDO_CMD sed -i "s|addr: \".*:9999\"|addr: \"${SERVER_IP}:${PAQET_PORT}\"|g" /etc/paqet/server.yaml
-    $SUDO_CMD sed -i "s|router_mac:.*|router_mac: \"${GATEWAY_MAC}\"|g" /etc/paqet/server.yaml
-    $SUDO_CMD sed -i "s|key:.*|key: \"${SECRET_KEY}\"|g" /etc/paqet/server.yaml
+    # Update network interface
+    $SUDO_CMD sed -i "s|interface:.*# CHANGE ME|interface: \"${INTERFACE}\"|g" /etc/paqet/client.yaml
     
-    print_success "Configuration file created from example at /etc/paqet/server.yaml"
+    # Update client IP (the one with :0 port)
+    $SUDO_CMD sed -i "s|addr: \".*:0\".*# CHANGE ME.*Local IP|addr: \"${CLIENT_IP}:0\"|g" /etc/paqet/client.yaml
+    
+    # Update router MAC address (first occurrence in ipv4 section)
+    $SUDO_CMD sed -i "0,/router_mac:.*# CHANGE ME/{s|router_mac:.*# CHANGE ME.*Gateway|router_mac: \"${GATEWAY_MAC}\"|}" /etc/paqet/client.yaml
+    
+    # Update SOCKS5 listen address
+    $SUDO_CMD sed -i "s|listen: \".*:1080\"|listen: \"${SOCKS5_LISTEN}\"|g" /etc/paqet/client.yaml
+    
+    # Update server address (the one that says "paqet server address and port")
+    $SUDO_CMD sed -i "s|addr: \".*:9999\".*# CHANGE ME.*paqet server|addr: \"${SERVER_ADDR}\"|g" /etc/paqet/client.yaml
+    
+    # Update secret key
+    $SUDO_CMD sed -i "s|key: \"your-secret-key-here\".*# CHANGE ME|key: \"${SECRET_KEY}\"|g" /etc/paqet/client.yaml
+    
+    print_success "Configuration file created from example at /etc/paqet/client.yaml"
 else
     print_warning "Example file not found, creating configuration from scratch..."
     
-    # Fallback: Create server configuration manually
-    $SUDO_CMD tee /etc/paqet/server.yaml > /dev/null << EOF
-# paqet Server Configuration
+    # Fallback: Create client configuration manually
+    $SUDO_CMD tee /etc/paqet/client.yaml > /dev/null << EOF
+# paqet Client Configuration
 # Auto-generated by installation script
 
-role: "server"
+role: "client"
 
 # Logging configuration
 log:
   level: "info"
 
-# Server listen configuration
-listen:
-  addr: ":${PAQET_PORT}"
+# SOCKS5 proxy configuration
+socks5:
+  - listen: "${SOCKS5_LISTEN}"
 
 # Network interface settings
 network:
   interface: "${INTERFACE}"
   ipv4:
-    addr: "${SERVER_IP}:${PAQET_PORT}"
+    addr: "${CLIENT_IP}:0"
     router_mac: "${GATEWAY_MAC}"
+
+# Server connection settings
+server:
+  addr: "${SERVER_ADDR}"
 
 # Transport protocol configuration
 transport:
@@ -236,23 +260,23 @@ transport:
     mode: "fast"
     key: "${SECRET_KEY}"
 EOF
-    print_success "Configuration file created at /etc/paqet/server.yaml"
+    print_success "Configuration file created at /etc/paqet/client.yaml"
 fi
 
-print_info "You can edit the configuration with: ${SUDO_CMD} nano /etc/paqet/server.yaml"
+print_info "You can edit the configuration with: ${SUDO_CMD} nano /etc/paqet/client.yaml"
 
-# Step 12: Create systemd Service
-print_header "Step 12: Creating systemd Service"
+# Step 13: Create systemd Service
+print_header "Step 13: Creating systemd Service"
 
 if [ "$IS_ROOT" = true ]; then
     # Root user service (simpler, runs as root)
     $SUDO_CMD tee /etc/systemd/system/paqet.service > /dev/null << EOF
 [Unit]
-Description=paqet Server
+Description=paqet Client
 After=network.target
 
 [Service]
-ExecStart=/usr/local/bin/paqet run -c /etc/paqet/server.yaml
+ExecStart=/usr/local/bin/paqet run -c /etc/paqet/client.yaml
 Restart=always
 User=root
 
@@ -264,12 +288,12 @@ else
     # Non-root user service (with capabilities)
     $SUDO_CMD tee /etc/systemd/system/paqet.service > /dev/null << EOF
 [Unit]
-Description=paqet Server
+Description=paqet Client
 After=network.target
 
 [Service]
 User=${CURRENT_USER}
-ExecStart=/usr/local/bin/paqet run -c /etc/paqet/server.yaml
+ExecStart=/usr/local/bin/paqet run -c /etc/paqet/client.yaml
 Restart=always
 RestartSec=2
 
@@ -286,8 +310,8 @@ fi
 
 print_success "Systemd service file created"
 
-# Step 13: Enable and Start Service
-print_header "Step 13: Starting paqet Service"
+# Step 14: Enable and Start Service
+print_header "Step 14: Starting paqet Service"
 $SUDO_CMD systemctl daemon-reload
 $SUDO_CMD systemctl enable paqet
 $SUDO_CMD systemctl start paqet
@@ -304,32 +328,24 @@ rm -rf paqet-install
 print_header "Installation Complete!"
 echo -e "${GREEN}Summary of Configuration:${NC}"
 echo -e "  Running as:         ${GREEN}${CURRENT_USER}${NC}"
-echo -e "  Server IP:          ${GREEN}${SERVER_IP}${NC}"
-echo -e "  Server Port:        ${GREEN}${PAQET_PORT}${NC}"
+echo -e "  Client IP:          ${GREEN}${CLIENT_IP}${NC}"
 echo -e "  Network Interface:  ${GREEN}${INTERFACE}${NC}"
 echo -e "  Gateway IP:         ${GREEN}${GATEWAY_IP}${NC}"
 echo -e "  Gateway MAC:        ${GREEN}${GATEWAY_MAC}${NC}"
-echo -e "  Secret Key:         ${GREEN}${SECRET_KEY}${NC}"
+echo -e "  Server Address:     ${GREEN}${SERVER_ADDR}${NC}"
+echo -e "  SOCKS5 Listen:      ${GREEN}${SOCKS5_LISTEN}${NC}"
+echo -e "  iptables Port:      ${GREEN}${CLIENT_PORT}${NC}"
 if [ -n "$UFW_PORT" ]; then
     echo -e "  UFW Allowed Port:   ${GREEN}${UFW_PORT}${NC}"
 fi
 echo ""
 echo -e "${YELLOW}Important Notes:${NC}"
-if [ "$IS_ROOT" = true ]; then
-    echo -e "  1. Secret key saved to: ${GREEN}/root/paqet-secret-key.txt${NC}"
-else
-    echo -e "  1. Secret key saved to: ${GREEN}~/paqet-secret-key.txt${NC}"
-fi
-echo -e "  2. Configuration file:  ${GREEN}/etc/paqet/server.yaml${NC}"
-echo -e "  3. Service status:      ${GREEN}${SUDO_CMD} systemctl status paqet${NC}"
-echo -e "  4. View logs:           ${GREEN}${SUDO_CMD} journalctl -u paqet -f${NC}"
+echo -e "  1. Configuration file:  ${GREEN}/etc/paqet/client.yaml${NC}"
+echo -e "  2. Service status:      ${GREEN}${SUDO_CMD} systemctl status paqet${NC}"
+echo -e "  3. View logs:           ${GREEN}${SUDO_CMD} journalctl -u paqet -f${NC}"
 echo ""
-echo -e "${YELLOW}Client Configuration:${NC}"
-echo -e "  Use these details in your client config:"
-echo -e "    server:"
-echo -e "      addr: \"${SERVER_IP}:${PAQET_PORT}\""
-echo -e "    transport:"
-echo -e "      kcp:"
-echo -e "        key: \"${SECRET_KEY}\""
+echo -e "${YELLOW}Testing the SOCKS5 Proxy:${NC}"
+echo -e "  Test with curl:"
+echo -e "    ${GREEN}curl -v https://httpbin.org/ip --proxy socks5h://${SOCKS5_LISTEN}${NC}"
 echo ""
 echo -e "${GREEN}Installation completed successfully!${NC}"
