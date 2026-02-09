@@ -202,24 +202,24 @@ if [ -f "example/client.yaml.example" ]; then
     print_info "Using client.yaml.example from the package..."
     $SUDO_CMD cp example/client.yaml.example /etc/paqet/client.yaml
     
-    # Update the configuration file with discovered values
+    # Update the configuration file with discovered values - preserving all comments
     # Update network interface
-    $SUDO_CMD sed -i "s|interface:.*# CHANGE ME|interface: \"${INTERFACE}\"|g" /etc/paqet/client.yaml
+    $SUDO_CMD sed -i '/^  interface:/s|"[^"]*"|"'${INTERFACE}'"|' /etc/paqet/client.yaml
     
-    # Update client IP (the one with :0 port)
-    $SUDO_CMD sed -i "s|addr: \".*:0\".*# CHANGE ME.*Local IP|addr: \"${CLIENT_IP}:0\"|g" /etc/paqet/client.yaml
+    # Update client IP address in ipv4 section
+    $SUDO_CMD sed -i '/ipv4:/,/router_mac:/{s|addr: "[^"]*:0"|addr: "'${CLIENT_IP}':0"|;}' /etc/paqet/client.yaml
     
-    # Update router MAC address (first occurrence in ipv4 section)
-    $SUDO_CMD sed -i "0,/router_mac:.*# CHANGE ME/{s|router_mac:.*# CHANGE ME.*Gateway|router_mac: \"${GATEWAY_MAC}\"|}" /etc/paqet/client.yaml
+    # Update router MAC address in ipv4 section only (first occurrence)
+    $SUDO_CMD sed -i '0,/router_mac: "[^"]*"/{s|router_mac: "[^"]*"|router_mac: "'${GATEWAY_MAC}'"|;}' /etc/paqet/client.yaml
     
     # Update SOCKS5 listen address
-    $SUDO_CMD sed -i "s|listen: \".*:1080\"|listen: \"${SOCKS5_LISTEN}\"|g" /etc/paqet/client.yaml
+    $SUDO_CMD sed -i '/socks5:/,/^[^ ]/{s|listen: "[^"]*"|listen: "'${SOCKS5_LISTEN}'"|;}' /etc/paqet/client.yaml
     
-    # Update server address (the one that says "paqet server address and port")
-    $SUDO_CMD sed -i "s|addr: \".*:9999\".*# CHANGE ME.*paqet server|addr: \"${SERVER_ADDR}\"|g" /etc/paqet/client.yaml
+    # Update server address
+    $SUDO_CMD sed -i '/^server:/,/^[^ ]/{s|addr: "[^"]*"|addr: "'${SERVER_ADDR}'"|;}' /etc/paqet/client.yaml
     
-    # Update secret key
-    $SUDO_CMD sed -i "s|key: \"your-secret-key-here\".*# CHANGE ME|key: \"${SECRET_KEY}\"|g" /etc/paqet/client.yaml
+    # Update secret key in kcp section
+    $SUDO_CMD sed -i '/kcp:/,/^[^ ]/{s|key: "[^"]*"|key: "'${SECRET_KEY}'"|;}' /etc/paqet/client.yaml
     
     print_success "Configuration file created from example at /etc/paqet/client.yaml"
 else
@@ -348,4 +348,4 @@ echo -e "${YELLOW}Testing the SOCKS5 Proxy:${NC}"
 echo -e "  Test with curl:"
 echo -e "    ${GREEN}curl -v https://httpbin.org/ip --proxy socks5h://${SOCKS5_LISTEN}${NC}"
 echo ""
-echo -e "${GREEN}Installation completed successfully!${NC}"
+echo -e "${GREEN}Installation completed successfully!${NC}","message":"Create install-paqet-client.sh file in thisisroot/paqet-i repository"
