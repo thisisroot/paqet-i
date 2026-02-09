@@ -73,9 +73,9 @@ print_success "System updated successfully"
 
 # Step 2: Install Essential Packages
 print_header "Step 2: Installing Essential Packages"
-print_info "Installing curl, wget, git, nano, vim, htop, net-tools, unzip, zip, software-properties-common..."
-$SUDO_CMD apt install curl wget git nano vim htop net-tools unzip zip software-properties-common -y
-print_success "Essential packages installed"
+print_info "Installing curl, wget, git, nano, vim, htop, net-tools, unzip, zip, software-properties-common, ufw..."
+$SUDO_CMD apt install curl wget git nano vim htop net-tools unzip zip software-properties-common ufw -y
+print_success "Essential packages installed (including UFW)"
 
 # Step 3: Prompt for Firewall Port Configuration
 print_header "Step 3: Firewall Port Configuration"

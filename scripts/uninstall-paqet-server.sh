@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# paqet Client Uninstaller Script
-# This script removes paqet client and all related configurations
-# Usage: bash uninstall-paqet-client.sh (will use sudo when needed)
+# paqet Server Uninstaller Script
+# This script removes paqet server and all related configurations
+# Usage: bash uninstall-paqet-server.sh (will use sudo when needed)
 
 set -e
 
@@ -55,16 +55,21 @@ if [ "$IS_ROOT" = false ]; then
     fi
 fi
 
-print_header "paqet Client Uninstallation"
+print_header "paqet Server Uninstallation"
 
-print_warning "This will completely remove paqet client from your system!"
+print_warning "This will completely remove paqet server from your system!"
 print_warning "The following will be removed:"
 echo "  - paqet systemd service"
 echo "  - paqet binary (/usr/local/bin/paqet)"
 echo "  - Configuration files (/etc/paqet/)"
 echo "  - iptables rules for paqet"
+if [ "$IS_ROOT" = true ]; then
+    echo "  - Secret key file (/root/paqet-secret-key.txt)"
+else
+    echo "  - Secret key file (~/paqet-secret-key.txt)"
+fi
 echo ""
-print_info "NOTE: System libraries (libpcap, etc.) will NOT be removed"
+print_info "NOTE: System libraries (libpcap, etc.) and UFW will NOT be removed"
 echo ""
 read -p "Are you sure you want to continue? (yes/no): " CONFIRM
 
@@ -128,21 +133,41 @@ else
     print_info "Configuration files kept"
 fi
 
-# Step 5: Ask about iptables rules removal
-print_header "Step 5: iptables Rules"
+# Step 5: Remove secret key file
+print_header "Step 5: Removing Secret Key File"
+if [ "$IS_ROOT" = true ]; then
+    if [ -f "/root/paqet-secret-key.txt" ]; then
+        print_info "Removing /root/paqet-secret-key.txt..."
+        rm -f /root/paqet-secret-key.txt
+        print_success "Secret key file removed"
+    else
+        print_info "Secret key file not found"
+    fi
+else
+    if [ -f "$HOME/paqet-secret-key.txt" ]; then
+        print_info "Removing ~/paqet-secret-key.txt..."
+        rm -f ~/paqet-secret-key.txt
+        print_success "Secret key file removed"
+    else
+        print_info "Secret key file not found"
+    fi
+fi
+
+# Step 6: Ask about iptables rules removal
+print_header "Step 6: iptables Rules"
 print_warning "iptables rules removal requires the port number that was used"
 read -p "Do you want to remove iptables rules? (yes/no): " REMOVE_IPTABLES
 
 if [ "$REMOVE_IPTABLES" = "yes" ]; then
-    read -p "Enter the port that was used for paqet client iptables: " CLIENT_PORT
+    read -p "Enter the port that was used for paqet server: " PAQET_PORT
     
-    if [ -n "$CLIENT_PORT" ]; then
-        print_info "Removing iptables rules for port ${CLIENT_PORT}..."
+    if [ -n "$PAQET_PORT" ]; then
+        print_info "Removing iptables rules for port ${PAQET_PORT}..."
         
         # Remove iptables rules (ignore errors if rules don't exist)
-        $SUDO_CMD iptables -t raw -D PREROUTING -p tcp --dport ${CLIENT_PORT} -j NOTRACK 2>/dev/null || true
-        $SUDO_CMD iptables -t raw -D OUTPUT -p tcp --sport ${CLIENT_PORT} -j NOTRACK 2>/dev/null || true
-        $SUDO_CMD iptables -t mangle -D OUTPUT -p tcp --sport ${CLIENT_PORT} --tcp-flags RST RST -j DROP 2>/dev/null || true
+        $SUDO_CMD iptables -t raw -D PREROUTING -p tcp --dport ${PAQET_PORT} -j NOTRACK 2>/dev/null || true
+        $SUDO_CMD iptables -t raw -D OUTPUT -p tcp --sport ${PAQET_PORT} -j NOTRACK 2>/dev/null || true
+        $SUDO_CMD iptables -t mangle -D OUTPUT -p tcp --sport ${PAQET_PORT} --tcp-flags RST RST -j DROP 2>/dev/null || true
         
         # Save iptables rules
         if command -v netfilter-persistent &> /dev/null; then
@@ -158,33 +183,9 @@ else
     print_info "iptables rules kept"
 fi
 
-# Step 6: Ask about UFW rules removal
-print_header "Step 6: UFW Rules"
-
-# Check if UFW is installed
-if command -v ufw &> /dev/null; then
-    read -p "Do you want to remove UFW rules? (yes/no): " REMOVE_UFW
-
-    if [ "$REMOVE_UFW" = "yes" ]; then
-        read -p "Enter the port that was allowed through UFW: " UFW_PORT
-        
-        if [ -n "$UFW_PORT" ]; then
-            print_info "Removing UFW rule for port ${UFW_PORT}..."
-            $SUDO_CMD ufw delete allow ${UFW_PORT}/tcp 2>/dev/null || true
-            print_success "UFW rule removed"
-        else
-            print_warning "No port provided, skipping UFW cleanup"
-        fi
-    else
-        print_info "UFW rules kept"
-    fi
-else
-    print_info "UFW is not installed, skipping UFW cleanup"
-fi
-
 # Final Summary
 print_header "Uninstallation Complete!"
-echo -e "${GREEN}paqet client has been removed from your system${NC}"
+echo -e "${GREEN}paqet server has been removed from your system${NC}"
 echo ""
 echo -e "${YELLOW}Summary:${NC}"
 echo -e "  ✓ Service stopped and disabled"
@@ -194,15 +195,11 @@ if [ "$REMOVE_CONFIG" = "yes" ]; then
 else
     echo -e "  - Configuration files kept at /etc/paqet/"
 fi
+echo -e "  ✓ Secret key file removed"
 if [ "$REMOVE_IPTABLES" = "yes" ]; then
     echo -e "  ✓ iptables rules removed"
 else
     echo -e "  - iptables rules kept"
-fi
-if [ "$REMOVE_UFW" = "yes" ] 2>/dev/null; then
-    echo -e "  ✓ UFW rules removed"
-else
-    echo -e "  - UFW rules kept"
 fi
 echo -e "  - System libraries kept (libpcap, iptables-persistent, etc.)"
 echo ""
